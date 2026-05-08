@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Steve's Local Ride Service</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+:root {
+--brand: #276ef1; --dark: #050505; --light: #f6f6f6;
+--gray: #e2e2e2; --error: #e63946; --success: #2ecc71; --venmo: #3d95ce;
+}
+body { font-family: -apple-system, sans-serif; background: var(--light); display: flex; justify-content: center; padding: 20px; color: #333; }
+.card { background: white; width: 100%; max-width: 440px; padding: 30px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }
+
+.area-banner { background: #fff4f4; border: 1px solid #ffcccc; padding: 12px; border-radius: 12px; margin-bottom: 20px; text-align: center; }
+.area-banner h4 { margin: 0 0 5px 0; color: var(--error); font-size: 0.9rem; }
+.area-banner p { margin: 0; font-size: 0.75rem; color: #666; }
+
+.status-container {
+display: flex; align-items: center; justify-content: center; gap: 10px;
+background: #fff; padding: 12px; border-radius: 50px; border: 1px solid var(--gray);
+margin-bottom: 20px; font-size: 0.9rem; font-weight: 700; cursor: pointer; user-select: none;
+}
+.dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; }
+.online { background-color: var(--success); box-shadow: 0 0 10px var(--success); animation: pulse 2s infinite; }
+.busy { background-color: #f39c12; box-shadow: 0 0 10px #f39c12; }
+.offline { background-color: var(--error); }
+@keyframes pulse { 0% { transform: scale(0.9); opacity: 0.7; } 70% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.7; } }
+
+#admin-panel { display: none; background: #333; color: white; padding: 15px; border-radius: 15px; margin-bottom: 20px; text-align: center; border: 2px solid var(--brand); }
+.admin-btn { padding: 10px 15px; margin: 5px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; font-size: 0.8rem; }
+
+label { display: block; font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; color: var(--brand); text-transform: uppercase; letter-spacing: 0.5px; }
+input, textarea { width: 100%; padding: 12px 15px; border: 1px solid var(--gray); border-radius: 12px; box-sizing: border-box; font-size: 1rem; margin-bottom: 12px; background: #fafafa; font-family: inherit; }
+
+.estimate-box { background: var(--dark); color: white; padding: 20px; border-radius: 18px; margin: 20px 0; text-align: center; display: flex; justify-content: space-between; align-items: center; }
+.price { font-size: 1.8rem; font-weight: 700; }
+
+.btn { width: 100%; border: none; padding: 18px; border-radius: 15px; font-size: 1.1rem; font-weight: 700; cursor: pointer; transition: 0.2s; text-align: center; display: block; text-decoration: none; }
+.btn-primary { background: var(--brand); color: white; }
+.btn-primary:disabled { background: #ccc; cursor: not-allowed; color: #888; }
+
+/* Payment Grid */
+.payment-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+.pay-opt { border: 1px solid var(--gray); padding: 12px; border-radius: 12px; cursor: pointer; font-weight: bold; text-align: center; font-size: 0.85rem; background: white; transition: 0.2s; display: flex; align-items: center; justify-content: center; text-decoration: none; color: inherit; }
+.pay-opt.active { border-color: var(--brand); background: #f0f5ff; box-shadow: 0 0 0 1px var(--brand); }
+.venmo-btn { background: var(--venmo); color: white; border: none; }
+
+.hidden { display: none; }
+.error-msg { color: var(--error); font-size: 0.85rem; margin-top: -8px; margin-bottom: 10px; font-weight: 600; display: none; background: #fff0f0; padding: 8px; border-radius: 8px; }
+#map-box { width: 100%; height: 180px; border-radius: 15px; margin-bottom: 15px; border: 1px solid var(--gray); }
+#copy-toast { text-align: center; font-size: 0.75rem; color: var(--success); font-weight: bold; margin-bottom: 10px; display: none; }
+</style>
+</head>
+<body>
+
+<div class="card">
+<div id="admin-panel">
+<p style="margin:0 0 10px 0;">Steve's Controls</p>
+<button class="admin-btn" style="background:var(--success);" onclick="updateStatus('available')">ONLINE</button>
+<button class="admin-btn" style="background:#f39c12;" onclick="updateStatus('busy')">BUSY</button>
+<button class="admin-btn" style="background:#666;" onclick="toggleAdmin()">CLOSE</button>
+</div>
+
+<div class="area-banner">
+<h4>10-Mile Boundary</h4>
+<p>Service available within 10 miles of Owens Rd base.</p>
+</div>
+
+<div id="status-bar" class="status-container" ondblclick="toggleAdmin()">
+<span id="status-dot" class="dot offline"></span>
+<span id="status-text">Connecting...</span>
+</div>
+
+<div id="step-1">
+<label>Rider Info</label>
+<input type="text" id="p_name" placeholder="Full Name">
+<input type="tel" id="p_phone" placeholder="Phone Number">
+
+<label style="margin-top:10px;">Pickup</label>
+<div id="p-radius-error" class="error-msg">❌ Outside 10-mile service area.</div>
+<input type="text" id="p_street" placeholder="Street Address" oninput="debouncedCalc()">
+<div class="row" style="display:flex; gap:10px;">
+<input type="text" id="p_city" style="flex:2" placeholder="City" oninput="debouncedCalc()">
+<input type="text" id="p_zip" style="flex:1" placeholder="Zip" oninput="debouncedCalc()">
+</div>
+
+<label style="margin-top:10px;">Drop-off</label>
+<div id="d-radius-error" class="error-msg">❌ Outside 10-mile service area.</div>
+<input type="text" id="d_street" placeholder="Street Address" oninput="debouncedCalc()">
+<div class="row" style="display:flex; gap:10px;">
+<input type="text" id="d_city" style="flex:2" placeholder="City" oninput="debouncedCalc()">
+<input type="text" id="d_zip" style="flex:1" placeholder="Zip" oninput="debouncedCalc()">
+</div>
+
+<div class="estimate-box">
+<div style="text-align:left;">Distance<br><span id="mile-display" style="font-size:1.1rem; font-weight:600;">0.0 mi</span></div>
+<div id="price-display" class="price">$`0.00</div>
+</div>
+
+<button id="main-btn" class="btn btn-primary" onclick="goToReview()" disabled>Review Details</button>
+</div>
+
+<div id="step-2" class="hidden">
+<div id="map-box"></div>
+
+<div style="background:#f9f9f9; padding:15px; border-radius:15px; margin-bottom:15px; font-size:0.85rem; line-height:1.4;">
+<b>Rider:</b> <span id="rev-name"></span><br>
+<b>Fare:</b> <span id="rev-fare" style="font-weight:700; color:var(--brand);"></span>
+</div>
+
+<label>Payment Method (Tap to Copy Info)</label>
+<div id="copy-toast">Info Copied!</div>
+<div class="payment-grid">
+<div id="opt-cash" class="pay-opt active" onclick="selectPay('Cash')">💵 Cash</div>
+<a id="pay-link" href="#" target="_blank" class="pay-opt venmo-btn" onclick="selectPay('Venmo')">📱 Venmo</a>
+<div id="opt-zelle" class="pay-opt" style="color:#6d1ed4; border-color:#6d1ed4;" onclick="copyPay('Zelle', '3467311092')">💜 Zelle</div>
+<div id="opt-chime" class="pay-opt" style="color:#24cf5f; border-color:#24cf5f;" onclick="copyPay('Chime', '`$SteveYourHandle')">🟢 Chime</div>
+</div>
+
+<form id="rideForm" action="https://formspree.io/f/mbdwlokk" method="POST">
+<input type="hidden" name="Rider_Name" id="hide-name">
+<input type="hidden" name="TAP_TO_TEXT" id="hide-phone">
+<input type="hidden" name="Pickup_Address" id="hide-pickup">
+<input type="hidden" name="Drop_Address" id="hide-dropoff">
+<input type="hidden" name="Fare_Amount" id="hide-price">
+<input type="hidden" name="Payment_Method" id="hide-pay" value="Cash">
+<button type="submit" id="submit-btn" class="btn btn-primary">Confirm & Request</button>
+</form>
+<button class="btn" style="background:transparent; text-decoration:underline; font-size:0.8rem; border:none;" onclick="goBack()">Go Back & Edit</button>
+</div>
+
+<div id="pending-screen" class="hidden" style="text-align:center; padding:40px 0;">
+<h2 style="color:var(--success)">Sent to Steve!</h2>
+<p>Steve will text you to confirm your ride.</p>
+<div style="margin-top:30px; font-size:0.8rem; color:#aaa;">Resetting in <span id="timer">120</span>s</div>
+</div>
+</div>
+
+<script>
+const DB_URL = "https://steveride-ea21c-default-rtdb.firebaseio.com/status.json";
+const STEVE_PHONE = "3467311092";
+const STEVE_VENMO = "Steve-YourUsername"; // <-- UPDATE THIS
+const STEVE_LAT = 30.1340, STEVE_LON = -95.2345;
+const RATE = 1.64, MIN_FARE = 5.00, MAX_RADIUS = 10.5;
+
+let calcTimer, curMiles = 0, curFare = 0.00, globalBusy = false;
+let pickupCoords = null, dropCoords = null, map = null;
+
+// -- ADMIN & STATUS --
+async function checkStatus() {
+try {
+const r = await fetch(DB_URL); const data = await r.json();
+globalBusy = (data === 'busy'); const hr = new Date().getHours();
+const dot = document.getElementById('status-dot'), txt = document.getElementById('status-text'), btn = document.getElementById('main-btn');
+if (globalBusy) { dot.className="dot busy"; txt.innerText="Steve is Busy"; btn.disabled=true; }
+else if (hr >= 11 && hr < 24) { dot.className="dot online"; txt.innerText="Steve is Online"; }
+else { dot.className="dot offline"; txt.innerText="Steve is Offline (11am-8pm)"; btn.disabled=true; }
+} catch (e) {}
+}
+async function updateStatus(s) { await fetch(DB_URL, {method:'PUT', body:JSON.stringify(s)}); location.reload(); }
+function toggleAdmin() { const p = document.getElementById('admin-panel'); p.style.display = (p.style.display==='block')?'none':'block'; }
+
+// -- PAYMENT LOGIC --
+function selectPay(method) {
+document.getElementById('hide-pay').value = method;
+document.querySelectorAll('.pay-opt').forEach(el => el.classList.remove('active'));
+const target = document.getElementById('opt-' + method.toLowerCase());
+if (target) target.classList.add('active');
+}
+
+function copyPay(method, val) {
+selectPay(method);
+navigator.clipboard.writeText(val).then(() => {
+const toast = document.getElementById('copy-toast');
+toast.innerText = method + " ID Copied!";
+toast.style.display = 'block';
+setTimeout(() => toast.style.display = 'none', 2500);
+});
+}
+
+// -- CALCULATION --
+function getDistance(la1, lo1) {
+const R = 3958.8; const dLa = (la1-STEVE_LAT)Math.PI/180; const dLo = (lo1-STEVE_LON)Math.PI/180;
+const a = Math.sin(dLa/2)**2 + Math.cos(STEVE_LATMath.PI/180)Math.cos(la1Math.PI/180)Math.sin(dLo/2) 2;
+return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function debouncedCalc() { clearTimeout(calcTimer); calcTimer = setTimeout(calculateRide, 1200); }
+
+async function calculateRide() {
+const pS = document.getElementById('p_street').value, pC = document.getElementById('p_city').value;
+const dS = document.getElementById('d_street').value, dC = document.getElementById('d_city').value;
+if (pS.length < 5 || dS.length < 5) return;
+try {
+const [pRes, dRes] = await Promise.all([
+fetch(https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(pS+' '+pC)}).then(r=&gt;r.json()), fetch(https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(dS+' '+dC)}).then(r=>r.json())
+ ]);
+if (pRes[0] && dRes[0]) {
+pickupCoords = pRes[0]; dropCoords = dRes[0];
+const pDist = getDistance(parseFloat(pRes[0].lat), parseFloat(pRes[0].lon));
+const dDist = getDistance(parseFloat(dRes[0].lat), parseFloat(dRes[0].lon));
+document.getElementById('p-radius-error').style.display = (pDist > MAX_RADIUS) ? 'block' : 'none';
+document.getElementById('d-radius-error').style.display = (dDist > MAX_RADIUS) ? 'block' : 'none';
+if (pDist <= MAX_RADIUS && dDist <= MAX_RADIUS) {
+const route = await fetch(https://router.project-osrm.org/route/v1/driving/${pRes[0].lon},${pRes[0].lat};${dRes[0].lon},${dRes[0].lat}).then(r=>r.json());
+curMiles = (route.routes[0].distance * 0.000621371).toFixed(1);
+curFare = Math.max(MIN_FARE, curMiles * RATE).toFixed(2);
+document.getElementById('mile-display').innerText = curMiles + " mi";
+document.getElementById('price-display').innerText = "$`" + curFare;
+if(!globalBusy) document.getElementById('main-btn').disabled = false;
+}
+}
+} catch (e) {}
+}
+
+// -- FLOW --
+function goToReview() {
+const name = document.getElementById('p_name').value;
+if(!name || !document.getElementById('p_phone').value) return alert("Missing Name/Phone");
+document.getElementById('step-1').classList.add('hidden');
+document.getElementById('step-2').classList.remove('hidden');
+
+if (!map) { map = L.map('map-box'); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map); }
+map.eachLayer(l => { if(l instanceof L.Marker || l instanceof L.Polyline) map.removeLayer(l); });
+const pL = [parseFloat(pickupCoords.lat), parseFloat(pickupCoords.lon)], dL = [parseFloat(dropCoords.lat), parseFloat(dropCoords.lon)];
+fetch(https://router.project-osrm.org/route/v1/driving/${pL[1]},{dL[1]},${dL[0]}?overview=full&geometries=geojson)
+.then(r => r.json()).then(data => {
+const line = L.polyline(data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]), {color: '#276ef1', weight: 5}).addTo(map);
+L.marker(pL).addTo(map); L.marker(dL).addTo(map);
+map.fitBounds(line.getBounds(), {padding:[20,20]});
+});
+
+document.getElementById('rev-name').innerText = name;
+document.getElementById('rev-fare').innerText = "$" + curFare; document.getElementById('pay-link').href =https://venmo.com/{curFare}&note=Ride%20for%20${encodeURIComponent(name)};
+
+document.getElementById('hide-name').value = name;
+document.getElementById('hide-phone').value = "sms:+1" + document.getElementById('p_phone').value.replace(/\D/g,'');
+document.getElementById('hide-pickup').value = document.getElementById('p_street').value;
+document.getElementById('hide-dropoff').value = document.getElementById('d_street').value;
+document.getElementById('hide-price').value = "`$" + curFare;
+}
+
+function goBack() { document.getElementById('step-2').classList.add('hidden'); document.getElementById('step-1').classList.remove('hidden'); }
+
+document.getElementById('rideForm').addEventListener('submit', function(e) {
+e.preventDefault();
+const b = document.getElementById('submit-btn'); b.disabled = true; b.innerText = "Sending...";
+fetch(e.target.action, { method: 'POST', body: new FormData(e.target), headers: { 'Accept': 'application/json' } })
+.then(() => {
+document.getElementById('step-2').classList.add('hidden');
+document.getElementById('pending-screen').classList.remove('hidden');
+let s = 120; setInterval(() => { s--; document.getElementById('timer').innerText = s; if(s<=0) location.reload(); }, 1000);
+});
+});
+
+setInterval(checkStatus, 15000); checkStatus();
+</script>
+</body>
+</html>
