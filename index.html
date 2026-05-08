@@ -160,7 +160,7 @@
             const dot = document.getElementById('status-dot'), txt = document.getElementById('status-text'), btn = document.getElementById('main-btn');
             if (globalBusy) { dot.className="dot busy"; txt.innerText="Steve is Busy"; btn.disabled=true; }
             else if (hr >= 11 && hr < 24) { dot.className="dot online"; txt.innerText="Steve is Online"; }
-            else { dot.className="dot offline"; txt.innerText="Steve is Offline (11am-8pm)"; btn.disabled=true; }
+            else { dot.className="dot offline"; txt.innerText="Steve is Offline (Business Hours 11am-8pm)"; btn.disabled=true; }
         } catch (e) {}
     }
     async function updateStatus(s) { await fetch(DB_URL, {method:'PUT', body:JSON.stringify(s)}); location.reload(); }
